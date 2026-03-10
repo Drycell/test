@@ -46,3 +46,29 @@ class HybridGenome:
     bias_delta: np.ndarray | None = None
     tau_log_scale_delta: np.ndarray | None = None
     edited_edge_scale_delta: np.ndarray | None = None
+
+
+@dataclass
+class EpisodeMetrics:
+    total_reward: float
+    episode_length: int
+    forward_distance: float
+    mean_height: float
+    mean_tilt_error: float
+    mean_angvel_penalty: float
+    mean_control_effort: float
+    termination_reason: str
+    edit_count: int
+    graph_edit_distance_proxy: float
+
+
+@dataclass
+class RunManifest:
+    resolved_config: dict[str, Any]
+    git_commit: str | None
+    python_version: str
+    platform: str
+    seed_list: list[int]
+    connectome_mode: str
+    experiment_name: str
+    timestamp_utc: str

@@ -8,6 +8,8 @@ import gymnasium as gym
 import mujoco
 import numpy as np
 
+from wormwing.aero.quasi_steady import wing_lift_drag, wing_torque_damping
+
 
 @dataclass
 class EnvConfig:
@@ -31,11 +33,11 @@ def build_xml() -> str:
       <geom type='capsule' fromto='-0.2 0 0 0.2 0 0' size='0.05' density='500'/>
       <body name='left_wing' pos='0 0.08 0'>
         <joint name='left_hinge' type='hinge' axis='1 0 0' range='-90 90'/>
-        <geom type='capsule' fromto='0 0 0 0 0.3 0' size='0.02' density='100'/>
+        <geom name='left_wing_geom' type='capsule' fromto='0 0 0 0 0.3 0' size='0.02' density='100'/>
       </body>
       <body name='right_wing' pos='0 -0.08 0'>
         <joint name='right_hinge' type='hinge' axis='1 0 0' range='-90 90'/>
-        <geom type='capsule' fromto='0 0 0 0 -0.3 0' size='0.02' density='100'/>
+        <geom name='right_wing_geom' type='capsule' fromto='0 0 0 0 -0.3 0' size='0.02' density='100'/>
       </body>
     </body>
   </worldbody>
@@ -57,16 +59,17 @@ class WingedWorm3DEnv(gym.Env):
         self.n_substeps = int(round(self.config.control_dt / self.config.physics_dt))
         self.max_steps = int(self.config.episode_seconds / self.config.control_dt)
         self.step_count = 0
-
+        self.left_wing_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "left_wing")
+        self.right_wing_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "right_wing")
+        self.left_hinge_qvel_idx = 6
+        self.right_hinge_qvel_idx = 7
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
 
     def _get_obs(self) -> np.ndarray:
-        qpos = self.data.qpos
-        qvel = self.data.qvel
-        quat = qpos[3:7]
-        roll, pitch = self._quat_to_euler(quat)
-        obs = np.array([
+        qpos, qvel = self.data.qpos, self.data.qvel
+        roll, pitch = self._quat_to_euler(qpos[3:7])
+        return np.array([
             math.cos(roll) * math.cos(pitch),
             roll,
             pitch,
@@ -81,7 +84,6 @@ class WingedWorm3DEnv(gym.Env):
             qvel[6],
             qvel[7],
         ], dtype=np.float32)
-        return obs
 
     @staticmethod
     def _quat_to_euler(q: np.ndarray) -> tuple[float, float]:
@@ -89,6 +91,19 @@ class WingedWorm3DEnv(gym.Env):
         roll = math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
         pitch = math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x))))
         return roll, pitch
+
+    def _apply_aero(self) -> None:
+        vx = float(self.data.qvel[0])
+        lhv = float(self.data.qvel[self.left_hinge_qvel_idx])
+        rhv = float(self.data.qvel[self.right_hinge_qvel_idx])
+        llift, ldrag = wing_lift_drag(lhv, vx)
+        rlift, rdrag = wing_lift_drag(rhv, vx)
+        lf = np.array([ldrag, 0.0, llift, 0.0, 0.0, 0.0])
+        rf = np.array([rdrag, 0.0, rlift, 0.0, 0.0, 0.0])
+        self.data.xfrc_applied[self.left_wing_body] = lf
+        self.data.xfrc_applied[self.right_wing_body] = rf
+        self.data.qfrc_applied[self.left_hinge_qvel_idx] += wing_torque_damping(lhv)
+        self.data.qfrc_applied[self.right_hinge_qvel_idx] += wing_torque_damping(rhv)
 
     def _reward(self, action: np.ndarray, done: bool) -> tuple[float, dict[str, float]]:
         obs = self._get_obs()
@@ -100,7 +115,7 @@ class WingedWorm3DEnv(gym.Env):
         effort = -0.01 * float(np.sum(action ** 2))
         terminal = -5.0 if done and self.step_count < self.max_steps else 0.0
         total = alive + forward + height + tilt + angvel + effort + terminal
-        parts = {
+        return total, {
             "alive_reward": alive,
             "forward_component": forward,
             "height_component": height,
@@ -109,7 +124,6 @@ class WingedWorm3DEnv(gym.Env):
             "control_effort_penalty": effort,
             "terminal_penalty": terminal,
         }
-        return total, parts
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
@@ -117,7 +131,18 @@ class WingedWorm3DEnv(gym.Env):
         mujoco.mj_resetData(self.model, self.data)
         rng = np.random.default_rng(seed)
         self.data.qpos[2] = self.config.start_height
-        self.data.qvel[0] = self.config.start_forward_speed
+        roll = rng.uniform(-0.08, 0.08)
+        pitch = rng.uniform(-0.08, 0.08)
+        q = np.array([
+            math.cos(roll / 2) * math.cos(pitch / 2),
+            math.sin(roll / 2) * math.cos(pitch / 2),
+            math.cos(roll / 2) * math.sin(pitch / 2),
+            0.0,
+        ])
+        self.data.qpos[3:7] = q
+        self.data.qvel[0] = self.config.start_forward_speed + rng.uniform(-0.1, 0.1)
+        self.data.qvel[3] = rng.uniform(-0.2, 0.2)
+        self.data.qvel[4] = rng.uniform(-0.2, 0.2)
         self.data.qpos[7] = rng.uniform(-0.05, 0.05)
         self.data.qpos[8] = rng.uniform(-0.05, 0.05)
         return self._get_obs(), {}
@@ -126,6 +151,7 @@ class WingedWorm3DEnv(gym.Env):
         action = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
         self.data.ctrl[:] = action
         for _ in range(self.n_substeps):
+            self._apply_aero()
             mujoco.mj_step(self.model, self.data)
         self.step_count += 1
         obs = self._get_obs()
@@ -134,8 +160,7 @@ class WingedWorm3DEnv(gym.Env):
         tilted = abs(roll) > math.radians(self.config.max_tilt_deg) or abs(pitch) > math.radians(self.config.max_tilt_deg)
         nan_state = not np.isfinite(obs).all()
         timeout = self.step_count >= self.max_steps
-        terminated = crash or tilted or nan_state
-        truncated = timeout and not terminated
+        terminated = bool(crash or tilted or nan_state)
+        truncated = bool(timeout and not terminated)
         reward, parts = self._reward(action, terminated)
-        info = {"reward_components": parts}
-        return obs, reward, terminated, truncated, info
+        return obs, reward, terminated, truncated, {"reward_components": parts}

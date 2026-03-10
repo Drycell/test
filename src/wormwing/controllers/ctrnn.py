@@ -30,8 +30,10 @@ class ConnectomeCTRNN:
         self.state = ControllerState(x=rng.normal(0.0, 0.01, self.w_chem.shape[0]), t=0.0)
 
     def _inject_observation(self, obs: np.ndarray) -> None:
+        # obs indices: [0:up,1:roll,2:pitch,3:droll,4:dpitch,5:vx,6:vy,7:vz,8:height,...]
+        sensor_values = np.array([obs[1], obs[2], obs[3], obs[4], obs[8], obs[7]], dtype=float)
         for i, idx in enumerate(self.connectome.virtual_sensor_indices):
-            self.state.x[idx] = float(obs[i]) if i < len(obs) else 0.0
+            self.state.x[idx] = float(sensor_values[i]) if i < len(sensor_values) else 0.0
 
     def step(self, observation: np.ndarray) -> np.ndarray:
         self._inject_observation(observation)
@@ -71,6 +73,9 @@ class ConnectomeCTRNN:
             elif edit.op == "del_gap":
                 self.w_gap[edit.src, edit.dst] = 0.0
                 self.w_gap[edit.dst, edit.src] = 0.0
+            elif edit.op == "retarget_chem" and edit.aux_src is not None and edit.aux_dst is not None:
+                self.w_chem[edit.src, edit.dst] = 0.0
+                self.w_chem[edit.aux_src, edit.aux_dst] = float(edit.value if edit.value is not None else 0.5)
 
     def apply_hybrid_genome(self, genome: HybridGenome) -> None:
         self.apply_structural_genome(genome.structural)
