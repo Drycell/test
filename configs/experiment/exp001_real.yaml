@@ -1,0 +1,5 @@
+experiment:
+  name: exp001_real
+  mode: structure_only
+  connectome_mode: real
+  real_data_dir: data/real_connectome
