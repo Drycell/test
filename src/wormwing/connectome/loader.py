@@ -15,7 +15,7 @@ def _clean_id_series(series: pd.Series) -> pd.Series:
     return series.astype(str).str.strip().str.replace(" ", "", regex=False)
 
 
-def load_connectome(data_dir: str | Path, append_virtual_nodes: bool = True) -> ConnectomeData:
+def load_connectome(data_dir: str | Path, append_virtual_nodes: bool = True, normalize: bool = True) -> ConnectomeData:
     data_path = Path(data_dir)
     neurons = pd.read_csv(data_path / "neurons.csv")
     chem = pd.read_csv(data_path / "chemical_synapses.csv")
@@ -52,6 +52,14 @@ def load_connectome(data_dir: str | Path, append_virtual_nodes: bool = True) -> 
         gap_w[a, b] += w
         gap_w[b, a] += w
 
+    if normalize:
+        chem_scale = float(np.max(np.abs(chem_w))) if chem_w.size else 1.0
+        gap_scale = float(np.max(np.abs(gap_w))) if gap_w.size else 1.0
+        if chem_scale > 0.0:
+            chem_w = chem_w / chem_scale
+        if gap_scale > 0.0:
+            gap_w = gap_w / gap_scale
+
     sensor_idxs = [i for i, x in enumerate(neurons["is_sensor"].tolist()) if int(x) == 1]
     motor_idxs = [i for i, x in enumerate(neurons["is_motor"].tolist()) if int(x) == 1]
 
@@ -75,7 +83,7 @@ def load_connectome(data_dir: str | Path, append_virtual_nodes: bool = True) -> 
         gap_weights=gap_w,
         sensor_node_indices=sensor_idxs,
         motor_node_indices=motor_idxs,
-        metadata={"sign_assumed_positive": sign_missing, "source_dir": str(data_path)},
+        metadata={"sign_assumed_positive": sign_missing, "source_dir": str(data_path), "normalized": normalize},
         allowed_add_chem_mask=add_chem,
         allowed_del_chem_mask=del_chem,
         allowed_add_gap_mask=add_gap,

@@ -3,12 +3,12 @@ experiment:
   mode: structure_only
   connectome_mode: mock
 env:
-  episode_seconds: 8.0
-  physics_dt: 0.001
-  control_dt: 0.01
-  start_height: 0.01
+  episode_seconds: 2.0
+  physics_dt: 0.00005
+  control_dt: 0.001
+  start_height: 0.005
   start_forward_speed: 0.05
-  crash_height: 0.002
+  crash_height: 0.0002
   max_tilt_deg: 75
   wind_gust_std: 0.0
   body_length_m: 0.01
@@ -18,9 +18,10 @@ env:
   air_density: 1.225
 controller:
   type: ctrnn
-  tau_init: 1.0
+  tau_init: 0.01
   bias_init: 0.0
   use_virtual_nodes: true
+  motor_bias: [0.8, -0.8]
 evolution:
   population_size: 32
   elite_count: 4

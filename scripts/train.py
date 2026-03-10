@@ -13,7 +13,10 @@ import yaml
 from wormwing.connectome.loader import load_connectome
 from wormwing.connectome.types import RunManifest, StructuralEdit, StructuralGenome
 from wormwing.controllers.ctrnn import ConnectomeCTRNN
+from wormwing.controllers.fixed_readout import FixedReadoutController
 from wormwing.envs.winged_worm_3d import EnvConfig, WingedWorm3DEnv
+from wormwing.evolution.fixed_readout import run_fixed_readout_optimization
+from wormwing.evolution.hybrid import run_structure_first_hybrid
 from wormwing.evolution.structure_only import evaluate_genome, run_structure_only
 from wormwing.experiments.baselines import run_fixed_readout_baseline, run_pd_baseline
 
@@ -27,7 +30,9 @@ def _git_commit() -> str | None:
 
 def _resolve_connectome_dir(cfg: dict) -> str:
     exp = cfg.get("experiment", {})
-    return str(exp.get("real_data_dir", "data/real_connectome")) if exp.get("connectome_mode", "mock") == "real" else "data/mock_connectome"
+    if exp.get("connectome_mode", "mock") == "real":
+        return str(exp.get("real_data_dir", "data/real_connectome"))
+    return "data/mock_connectome"
 
 
 def _read_best_genome(run_dir: Path) -> StructuralGenome:
@@ -49,36 +54,45 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "config_resolved.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
+    seeds = list(cfg.get("evolution", {}).get("train_eval_seeds", [0, 1, 2, 3]))
+    final_eval_seeds = list(cfg.get("evolution", {}).get("final_eval_seeds", seeds))
+
     manifest = RunManifest(
         resolved_config=cfg,
         git_commit=_git_commit(),
         python_version=platform.python_version(),
         platform=platform.platform(),
-        seed_list=list(cfg.get("evolution", {}).get("train_eval_seeds", [])),
+        seed_list=seeds,
         connectome_mode=cfg.get("experiment", {}).get("connectome_mode", "mock"),
         experiment_name=cfg.get("experiment", {}).get("name", "exp001"),
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
     )
     (run_dir / "manifest.json").write_text(json.dumps(asdict(manifest), indent=2, default=str))
 
-    conn = load_connectome(_resolve_connectome_dir(cfg))
+    conn = load_connectome(_resolve_connectome_dir(cfg), normalize=True)
+    env_cfg = EnvConfig(**{k: v for k, v in cfg.get("env", {}).items() if k in EnvConfig.__annotations__})
+    env = WingedWorm3DEnv(env_cfg)
+
+    mode = cfg.get("experiment", {}).get("mode", "structure_only")
+    motor_bias = tuple(cfg.get("controller", {}).get("motor_bias", [0.0, 0.0]))
     controller = ConnectomeCTRNN(
         conn,
         dt=float(cfg.get("env", {}).get("control_dt", 0.02)),
         tau_init=float(cfg.get("controller", {}).get("tau_init", 1.0)),
         bias_init=float(cfg.get("controller", {}).get("bias_init", 0.0)),
+        motor_bias=(float(motor_bias[0]), float(motor_bias[1])),
     )
-    env_cfg = EnvConfig(**{k: v for k, v in cfg.get("env", {}).items() if k in EnvConfig.__annotations__})
-    env = WingedWorm3DEnv(env_cfg)
-
-    seeds = list(cfg.get("evolution", {}).get("train_eval_seeds", [0, 1, 2, 3]))
-    final_eval_seeds = list(cfg.get("evolution", {}).get("final_eval_seeds", seeds))
 
     pd_score = float(sum(run_pd_baseline(env, s) for s in seeds) / len(seeds))
     fixed_score = float(sum(run_fixed_readout_baseline(controller, env, s) for s in seeds) / len(seeds))
-    (run_dir / "baseline_summary.json").write_text(
-        json.dumps({"pd_mean_total_reward": pd_score, "fixed_readout_mean_total_reward": fixed_score}, indent=2)
-    )
+    baseline = {"pd_mean_total_reward": pd_score, "fixed_readout_mean_total_reward": fixed_score}
+
+    if mode == "fixed_readout":
+        fixed_controller = FixedReadoutController(conn, dt=float(cfg.get("env", {}).get("control_dt", 0.02)))
+        baseline.update(run_fixed_readout_optimization(fixed_controller, env, seeds))
+        (run_dir / "baseline_summary.json").write_text(json.dumps(baseline, indent=2))
+        print("train_done", run_dir)
+        return
 
     run_structure_only(
         controller,
@@ -94,7 +108,12 @@ def main() -> None:
         edit_penalty=float(cfg.get("evolution", {}).get("edit_penalty", 0.05)),
     )
 
-    # Write eval summary directly from train so run dir is self-contained.
+    if mode == "structure_first_hybrid":
+        best_genome = _read_best_genome(run_dir)
+        baseline.update(run_structure_first_hybrid(controller, env, best_genome, seeds))
+
+    (run_dir / "baseline_summary.json").write_text(json.dumps(baseline, indent=2))
+
     best_genome = _read_best_genome(run_dir)
     eval_score, eval_metrics, _ = evaluate_genome(
         best_genome,
@@ -115,7 +134,6 @@ def main() -> None:
         "edit_count": int(eval_metrics.edit_count),
     }
     (run_dir / "eval_summary.json").write_text(json.dumps(eval_summary, indent=2))
-
     print("train_done", run_dir)
 
 

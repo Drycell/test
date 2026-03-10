@@ -1,2 +1,4 @@
 mode: structure_first_hybrid
-local_optimizer: cmaes
+local_steps: 12
+sigma: 0.2
+source_run_dir: runs/latest

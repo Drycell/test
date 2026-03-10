@@ -40,8 +40,10 @@ def mutate_genome(parent: StructuralGenome, n_nodes: int, seed: int, mutation_cf
     p_delete = float(mutation_cfg.get("p_delete", 0.15))
     p_replace = float(mutation_cfg.get("p_replace", 0.20))
     p_retarget = float(mutation_cfg.get("p_retarget", 0.15))
+    p_rescale = float(mutation_cfg.get("p_rescale", 0.15))
 
-    r = rng.random()
+    total = max(1e-8, p_append + p_delete + p_replace + p_retarget + p_rescale)
+    r = rng.random() * total
     if r < p_append and len(edits) < parent.max_edits:
         edits.append(_random_edit(rng, n_nodes))
     elif r < p_append + p_delete and edits:
@@ -59,7 +61,7 @@ def mutate_genome(parent: StructuralGenome, n_nodes: int, seed: int, mutation_cf
             aux_dst=int(rng.integers(0, n_nodes)),
             value=e.value,
         )
-    elif edits:
+    elif r < p_append + p_delete + p_replace + p_retarget + p_rescale and edits:
         i = int(rng.integers(0, len(edits)))
         e = edits[i]
         edits[i] = StructuralEdit(op=e.op, src=e.src, dst=e.dst, aux_src=e.aux_src, aux_dst=e.aux_dst, value=float(rng.choice(EDGE_VALUES)))
@@ -84,7 +86,7 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
 
     while not done:
         trajectory.append(obs.astype(np.float32, copy=True))
-        action = controller.step(obs)
+        action = controller.step(env.virtual_sensor_obs(obs))
         obs, rew, term, trunc, info = env.step(action)
         total_reward += float(rew)
         steps += 1

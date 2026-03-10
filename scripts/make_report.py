@@ -13,7 +13,12 @@ def summarize_run(run_dir: Path) -> dict:
     eval_summary = json.loads((run_dir / "eval_summary.json").read_text())
     best_genome = json.loads((run_dir / "best_genome.json").read_text())
     baseline = json.loads((run_dir / "baseline_summary.json").read_text()) if (run_dir / "baseline_summary.json").exists() else {}
-    return {"eval": eval_summary, "edit_count": len(best_genome.get("edits", [])), "baseline": baseline}
+    node_counts = {}
+    for e in best_genome.get("edits", []):
+        node_counts[e.get("src")] = node_counts.get(e.get("src"), 0) + 1
+        node_counts[e.get("dst")] = node_counts.get(e.get("dst"), 0) + 1
+    graph_summary = json.loads((run_dir / "best_graph_before_after.json").read_text()) if (run_dir / "best_graph_before_after.json").exists() else {}
+    return {"eval": eval_summary, "edit_count": len(best_genome.get("edits", [])), "baseline": baseline, "node_edit_frequency": node_counts, "graph_summary": graph_summary}
 
 
 def compare_runs(run_dirs: list[Path]) -> list[dict]:
@@ -76,6 +81,8 @@ def main() -> None:
         f"- mean_total_reward: {summary['eval'].get('mean_total_reward', 'n/a')}",
         f"- mean_episode_length: {summary['eval'].get('mean_episode_length', 'n/a')}",
         f"- edit_count: {summary['edit_count']}",
+        f"- graph_summary: {summary.get('graph_summary', {})}",
+        f"- top_edited_nodes: {sorted(summary.get('node_edit_frequency', {}).items(), key=lambda kv: kv[1], reverse=True)[:5]}",
         f"- edit_table: `{edit_table.name}`",
         "- figures: `fig_learning_curve.png`, `fig_best_vs_baseline.png`, `fig_edit_histogram.png`",
     ])

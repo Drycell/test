@@ -21,7 +21,7 @@ def main() -> None:
     run_dir = Path(args.run_dir)
 
     cfg = yaml.safe_load((run_dir / "config_resolved.yaml").read_text())
-    conn = load_connectome("data/mock_connectome" if cfg.get("experiment", {}).get("connectome_mode", "mock") == "mock" else cfg.get("experiment", {}).get("real_data_dir", "data/real_connectome"))
+    conn = load_connectome("data/mock_connectome" if cfg.get("experiment", {}).get("connectome_mode", "mock") == "mock" else cfg.get("experiment", {}).get("real_data_dir", "data/real_connectome"), normalize=True)
     env = WingedWorm3DEnv(EnvConfig(**{k: v for k, v in cfg.get("env", {}).items() if k in EnvConfig.__annotations__}))
     controller = ConnectomeCTRNN(conn, dt=float(cfg.get("env", {}).get("control_dt", 0.02)))
 
@@ -29,7 +29,7 @@ def main() -> None:
         ckpt = pickle.load(f)
     g = ckpt["best_genome"]
     genome = StructuralGenome(edits=[StructuralEdit(**e) for e in g["edits"]], max_edits=int(g["max_edits"]), seed=int(g["seed"]))
-    seeds = list(cfg.get("evolution", {}).get("train_eval_seeds", [0, 1, 2, 3]))
+    seeds = list(cfg.get("evolution", {}).get("final_eval_seeds", cfg.get("evolution", {}).get("train_eval_seeds", [0, 1, 2, 3])))
     score, info, _ = evaluate_genome(genome, controller, env, seeds, float(cfg.get("evolution", {}).get("edit_penalty", 0.05)))
     summary = {
         "status": "ok",

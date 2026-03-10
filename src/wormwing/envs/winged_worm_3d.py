@@ -131,11 +131,15 @@ class WingedWorm3DEnv(gym.Env):
         self.data.qfrc_applied[self.left_hinge_qvel_idx] += wing_torque_damping(lhv)
         self.data.qfrc_applied[self.right_hinge_qvel_idx] += wing_torque_damping(rhv)
 
+    def virtual_sensor_obs(self, obs: np.ndarray) -> np.ndarray:
+        # [roll, pitch, droll, dpitch, alt, dalt]
+        return np.array([obs[1], obs[2], obs[3], obs[4], obs[8], obs[7]], dtype=np.float32)
+
     def _reward(self, action: np.ndarray, done: bool) -> tuple[float, dict[str, float]]:
         obs = self._get_obs()
         alive = 1.0
-        forward = 10.0 * obs[5]
-        height = 300.0 * max(0.0, obs[8])
+        forward = 2.0 * (obs[5] / max(1e-6, self.config.start_forward_speed))
+        height = 2.0 * max(0.0, obs[8] / max(1e-6, self.config.start_height))
         tilt = -0.3 * (abs(obs[1]) + abs(obs[2]))
         angvel = -0.05 * (abs(obs[3]) + abs(obs[4]))
         effort = -0.01 * float(np.sum(action**2))
