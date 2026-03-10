@@ -20,6 +20,7 @@ make report-latest
 - 기본 실험 설정: `configs/experiment/exp001_mock.yaml`
 - 긴 실행 설정: `configs/experiment/exp001_mock_long.yaml`
 - mock connectome 데이터: `data/mock_connectome/`
+- 실제 커넥톰 번들 데이터: `data/real_connectome/`
 - 훈련 결과 디렉터리: `runs/latest/`
 
 ## 3) 산출물 확인
@@ -52,3 +53,10 @@ python -m compileall src scripts tests
 ```
 
 다만 실제 시뮬레이션(`mujoco`, `gymnasium`, `numpy`) 실행은 패키지 설치가 필요합니다.
+
+
+## 5) 실제 커넥톰 실행
+
+```bash
+PYTHONPATH=src python scripts/train.py --config configs/experiment/exp001_real.yaml
+```

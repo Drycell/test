@@ -42,6 +42,9 @@ class ConnectomeCTRNN:
         gap_term = np.sum(self.w_gap * (x[None, :] - x[:, None]), axis=1)
         x_dot = (-x + self.w_chem @ tanh_x + gap_term + self.bias) / np.maximum(self.tau, 1e-3)
         self.state.x = x + self.dt * x_dot
+        # Virtual sensory nodes are clamped to observation channels each control step.
+        # Re-apply after integration so recurrent dynamics cannot drift these nodes.
+        self._inject_observation(observation)
         self.state.t += self.dt
         out = np.zeros(2, dtype=float)
         for i, idx in enumerate(self.connectome.virtual_motor_indices[:2]):

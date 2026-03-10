@@ -18,6 +18,12 @@ make eval-latest
 make report-latest
 ```
 
+## Connectome modes
+
+- Mock mode (default): `data/mock_connectome`
+- Real bundle mode: `data/real_connectome` (derived from OpenWorm c302 hermaphrodite edgelist)
+
+Use `configs/experiment/exp001_real.yaml` to run with the real bundle.
 
 ## Korean Guide
 
