@@ -1,0 +1,8 @@
+experiment:
+  name: exp001_mock_long
+  mode: structure_only
+  connectome_mode: mock
+evolution:
+  population_size: 96
+  generations: 150
+  max_edits: 8
