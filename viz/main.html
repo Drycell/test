@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>WormWing Viz</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module" src="vis.js"></script>
+  </head>
+  <body>
+    <h1>WormWing Run Visualizer</h1>
+    <div class="grid">
+      <section>
+        <h2>Run summary</h2>
+        <pre id="summary"></pre>
+      </section>
+      <section>
+        <h2>Fitness curve</h2>
+        <canvas id="fitness" width="520" height="220"></canvas>
+      </section>
+      <section class="wide">
+        <h2>3D replay</h2>
+        <div id="scene"></div>
+        <div class="controls">
+          <button id="play">Play/Pause</button>
+          <input type="range" id="step" min="0" max="0" value="0" />
+          <span id="stepLabel">0</span>
+        </div>
+        <pre id="frame"></pre>
+      </section>
+    </div>
+  </body>
+</html>
