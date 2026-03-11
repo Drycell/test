@@ -11,9 +11,9 @@ def wing_lift_drag(
     air_density: float = 1.225,
     hinge_angle: float = 0.0,
     beat_freq_hz: float = 400.0,
-    cl: float = 1.2,
-    cd: float = 1.2,
-    thrust_ratio: float = 0.08,
+    cl: float = 0.25,
+    cd: float = 1.0,
+    thrust_ratio: float = 0.03,
 ) -> tuple[float, float]:
     """Quasi-steady low-Re estimate for tiny flapping wings.
 
@@ -22,7 +22,7 @@ def wing_lift_drag(
     """
     area = max(1e-12, wing_span_m * wing_chord_m)
     flap_speed = 2.0 * math.pi * max(1.0, beat_freq_hz) * max(1e-6, wing_span_m) * abs(math.sin(float(hinge_angle)))
-    rel_speed = max(1e-5, abs(body_vx) + flap_speed + 0.1 * abs(hinge_vel) * wing_span_m)
+    rel_speed = max(1e-5, flap_speed + 0.1 * abs(hinge_vel) * wing_span_m)
     q = 0.5 * air_density * rel_speed * rel_speed
     lift = q * cl * area
     drag = q * cd * area

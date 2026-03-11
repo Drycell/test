@@ -13,7 +13,7 @@ env:
   body_length_m: 0.001
   body_radius_m: 0.00004
   wing_span_m: 0.0005
-  wing_chord_m: 0.0005
+  wing_chord_m: 0.0004
   air_density: 1.225
   beat_freq_hz: 400.0
 controller:

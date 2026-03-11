@@ -13,7 +13,7 @@ from wormwing.aero.quasi_steady import body_drag, wing_lift_drag, wing_torque_da
 
 @dataclass
 class EnvConfig:
-    episode_seconds: float = 8.0
+    episode_seconds: float = 2.0
     physics_dt: float = 0.00005
     control_dt: float = 0.001
     start_height: float = 0.005
@@ -23,10 +23,11 @@ class EnvConfig:
     body_length_m: float = 0.001
     body_radius_m: float = 0.00004
     wing_span_m: float = 0.0005
-    wing_chord_m: float = 0.0005
+    wing_chord_m: float = 0.0004
     air_density: float = 1.225
     wing_target_range_rad: float = 1.5
     beat_freq_hz: float = 400.0
+    suppress_mujoco_warnings: bool = True
 
 
 def build_xml(cfg: EnvConfig) -> str:
@@ -70,6 +71,8 @@ class WingedWorm3DEnv(gym.Env):
 
     def __init__(self, config: EnvConfig | None = None):
         self.config = config or EnvConfig()
+        if self.config.suppress_mujoco_warnings:
+            mujoco.set_mju_user_warning(lambda _msg: None)
         self.model = mujoco.MjModel.from_xml_string(build_xml(self.config))
         self.data = mujoco.MjData(self.model)
         self.n_substeps = int(round(self.config.control_dt / self.config.physics_dt))
@@ -186,8 +189,8 @@ class WingedWorm3DEnv(gym.Env):
         ])
         self.data.qpos[3:7] = q
         self.data.qvel[0] = self.config.start_forward_speed + rng.uniform(-0.002, 0.002)
-        self.data.qvel[3] = rng.uniform(-1.0, 1.0)
-        self.data.qvel[4] = rng.uniform(-1.0, 1.0)
+        self.data.qvel[3] = rng.uniform(-0.1, 0.1)
+        self.data.qvel[4] = rng.uniform(-0.1, 0.1)
         self.data.qpos[self.left_hinge_qpos_idx] = rng.uniform(0.6, 0.8)
         self.data.qpos[self.right_hinge_qpos_idx] = rng.uniform(-0.8, -0.6)
         return self._get_obs(), {}
