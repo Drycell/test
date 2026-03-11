@@ -1,0 +1,10 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app/src
+    volumes:
+      - .:/app
