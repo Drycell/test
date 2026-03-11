@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import pickle
+import sys
 from pathlib import Path
 
 import yaml
@@ -14,18 +15,33 @@ from wormwing.envs.winged_worm_3d import EnvConfig, WingedWorm3DEnv
 from wormwing.evolution.structure_only import evaluate_genome
 
 
+def _required_paths(run_dir: Path) -> tuple[Path, Path]:
+    return run_dir / "config_resolved.yaml", run_dir / "best.ckpt"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
     args = parser.parse_args()
     run_dir = Path(args.run_dir)
 
-    cfg = yaml.safe_load((run_dir / "config_resolved.yaml").read_text())
-    conn = load_connectome("data/mock_connectome" if cfg.get("experiment", {}).get("connectome_mode", "mock") == "mock" else cfg.get("experiment", {}).get("real_data_dir", "data/real_connectome"), normalize=True)
+    cfg_path, ckpt_path = _required_paths(run_dir)
+    missing = [str(p) for p in [cfg_path, ckpt_path] if not p.exists()]
+    if missing:
+        print(f"eval_guard_error missing files: {missing}. Run train first (e.g., make train-exp001).")
+        sys.exit(2)
+
+    cfg = yaml.safe_load(cfg_path.read_text())
+    connectome_dir = (
+        "data/mock_connectome"
+        if cfg.get("experiment", {}).get("connectome_mode", "mock") == "mock"
+        else cfg.get("experiment", {}).get("real_data_dir", "data/real_connectome")
+    )
+    conn = load_connectome(connectome_dir, normalize=True)
     env = WingedWorm3DEnv(EnvConfig(**{k: v for k, v in cfg.get("env", {}).items() if k in EnvConfig.__annotations__}))
     controller = ConnectomeCTRNN(conn, dt=float(cfg.get("env", {}).get("control_dt", 0.02)))
 
-    with (run_dir / "best.ckpt").open("rb") as f:
+    with ckpt_path.open("rb") as f:
         ckpt = pickle.load(f)
     g = ckpt["best_genome"]
     genome = StructuralGenome(edits=[StructuralEdit(**e) for e in g["edits"]], max_edits=int(g["max_edits"]), seed=int(g["seed"]))
