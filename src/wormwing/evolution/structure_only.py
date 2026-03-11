@@ -120,6 +120,7 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
         termination_reason=str(last_info.get("termination_reason", "done")),
         edit_count=len(genome.edits),
         graph_edit_distance_proxy=float(len(genome.edits)),
+        energy_remaining=float(getattr(env, "energy", 0.0)),
     )
     return metrics, np.asarray(trajectory, dtype=np.float32)
 
@@ -147,6 +148,7 @@ def evaluate_genome(genome: StructuralGenome, controller: ConnectomeCTRNN, env: 
         termination_reason=str(episode_metrics[-1].termination_reason),
         edit_count=len(genome.edits),
         graph_edit_distance_proxy=float(len(genome.edits)),
+        energy_remaining=float(np.mean([m.energy_remaining for m in episode_metrics])),
     )
     return float(score), agg, best_traj
 
@@ -247,6 +249,7 @@ def run_structure_only(
         "mean_angvel_penalty": float(best_metrics.mean_angvel_penalty),
         "mean_control_effort": float(best_metrics.mean_control_effort),
         "graph_edit_distance_proxy": float(best_metrics.graph_edit_distance_proxy),
+        "energy_remaining": float(best_metrics.energy_remaining),
     }
 
     (run_dir / "generation_summary.csv").write_text("generation,best_fitness\n" + "\n".join(f"{r['generation']},{r['best_fitness']}" for r in rows))

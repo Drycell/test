@@ -28,6 +28,10 @@ class EnvConfig:
     wing_target_range_rad: float = 1.5
     beat_freq_hz: float = 400.0
     suppress_mujoco_warnings: bool = True
+    energy_budget: float = 1.0
+    basal_cost_per_step: float = 0.0002
+    wing_cost_scale: float = 0.001
+    stall_cost_per_step: float = 0.02
 
 
 def build_xml(cfg: EnvConfig) -> str:
@@ -87,6 +91,8 @@ class WingedWorm3DEnv(gym.Env):
         self.right_hinge_qpos_idx = 8
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        self.energy = float(self.config.energy_budget)
+        self.last_action = np.zeros(2, dtype=float)
 
     def _get_obs(self) -> np.ndarray:
         qpos, qvel = self.data.qpos, self.data.qvel
@@ -141,10 +147,10 @@ class WingedWorm3DEnv(gym.Env):
         body_area = self.config.body_length_m * 2.0 * self.config.body_radius_m
         torso_drag = body_drag(vx, area_m2=body_area, air_density=self.config.air_density)
 
-        self.data.xfrc_applied[self.left_wing_body] = np.array([ldrag, 0.0, llift, 0.0, 0.0, 0.0])
-        self.data.xfrc_applied[self.right_wing_body] = np.array([rdrag, 0.0, rlift, 0.0, 0.0, 0.0])
-        self.data.xfrc_applied[self.torso_body, 0:3] += -2e-9 * self.data.qvel[0:3]
-        self.data.xfrc_applied[self.torso_body, 3:6] += -2e-12 * self.data.qvel[3:6]
+        left_gain = float(abs(self.last_action[0]))
+        right_gain = float(abs(self.last_action[1]))
+        self.data.xfrc_applied[self.left_wing_body] = np.array([left_gain * ldrag, 0.0, left_gain * llift, 0.0, 0.0, 0.0])
+        self.data.xfrc_applied[self.right_wing_body] = np.array([right_gain * rdrag, 0.0, right_gain * rlift, 0.0, 0.0, 0.0])
         self.data.xfrc_applied[self.torso_body, 0] += torso_drag
 
         self.data.qfrc_applied[self.left_hinge_qvel_idx] += wing_torque_damping(lhv)
@@ -153,7 +159,7 @@ class WingedWorm3DEnv(gym.Env):
     def virtual_sensor_obs(self, obs: np.ndarray) -> np.ndarray:
         return np.array([obs[1], obs[2], obs[3], obs[4], obs[8], obs[7]], dtype=np.float32)
 
-    def _reward(self, action: np.ndarray, done: bool) -> tuple[float, dict[str, float]]:
+    def _reward(self, action: np.ndarray, done: bool, energy_component: float) -> tuple[float, dict[str, float]]:
         obs = self._get_obs()
         alive = 1.0
         forward = 2.0 * (obs[5] / max(1e-6, self.config.start_forward_speed))
@@ -162,7 +168,7 @@ class WingedWorm3DEnv(gym.Env):
         angvel = -0.05 * (abs(obs[3]) + abs(obs[4]))
         effort = -0.01 * float(np.sum(action**2))
         terminal = -5.0 if done and self.step_count < self.max_steps else 0.0
-        total = alive + forward + height + tilt + angvel + effort + terminal
+        total = alive + forward + height + tilt + angvel + effort + energy_component + terminal
         return total, {
             "alive_reward": alive,
             "forward_component": forward,
@@ -170,6 +176,7 @@ class WingedWorm3DEnv(gym.Env):
             "tilt_penalty": tilt,
             "angvel_penalty": angvel,
             "control_effort_penalty": effort,
+            "energy_component": energy_component,
             "terminal_penalty": terminal,
         }
 
@@ -179,8 +186,8 @@ class WingedWorm3DEnv(gym.Env):
         mujoco.mj_resetData(self.model, self.data)
         rng = np.random.default_rng(seed)
         self.data.qpos[2] = self.config.start_height
-        roll = rng.uniform(-0.08, 0.08)
-        pitch = rng.uniform(-0.08, 0.08)
+        roll = rng.uniform(-0.25, 0.25)
+        pitch = rng.uniform(-0.25, 0.25)
         q = np.array([
             math.cos(roll / 2) * math.cos(pitch / 2),
             math.sin(roll / 2) * math.cos(pitch / 2),
@@ -191,12 +198,15 @@ class WingedWorm3DEnv(gym.Env):
         self.data.qvel[0] = self.config.start_forward_speed + rng.uniform(-0.002, 0.002)
         self.data.qvel[3] = rng.uniform(-0.1, 0.1)
         self.data.qvel[4] = rng.uniform(-0.1, 0.1)
-        self.data.qpos[self.left_hinge_qpos_idx] = rng.uniform(0.6, 0.8)
-        self.data.qpos[self.right_hinge_qpos_idx] = rng.uniform(-0.8, -0.6)
+        self.data.qpos[self.left_hinge_qpos_idx] = 0.0
+        self.data.qpos[self.right_hinge_qpos_idx] = 0.0
+        self.energy = float(self.config.energy_budget)
+        self.last_action = np.zeros(2, dtype=float)
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):
         action = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
+        self.last_action = action.astype(float, copy=True)
         self.data.ctrl[:] = action * self.config.wing_target_range_rad
         for _ in range(self.n_substeps):
             self._apply_aero()
@@ -207,10 +217,14 @@ class WingedWorm3DEnv(gym.Env):
         crash = obs[8] < self.config.crash_height
         tilted = abs(roll) > math.radians(self.config.max_tilt_deg) or abs(pitch) > math.radians(self.config.max_tilt_deg)
         nan_state = not np.isfinite(obs).all()
+        wing_activity = float(np.sum(np.abs(action)))
+        stall_cost = self.config.stall_cost_per_step if wing_activity < 0.1 else 0.0
+        self.energy -= self.config.basal_cost_per_step + self.config.wing_cost_scale * wing_activity + stall_cost
+        exhausted = self.energy <= 0.0
         timeout = self.step_count >= self.max_steps
-        terminated = bool(crash or tilted or nan_state)
+        terminated = bool(crash or tilted or nan_state or exhausted)
         truncated = bool(timeout and not terminated)
-        reward, parts = self._reward(action, terminated)
+        reward, parts = self._reward(action, terminated, energy_component=0.3 * max(0.0, self.energy))
         reason = "running"
         if crash:
             reason = "crash"
@@ -218,6 +232,8 @@ class WingedWorm3DEnv(gym.Env):
             reason = "tilted"
         elif nan_state:
             reason = "nan"
+        elif exhausted:
+            reason = "exhausted"
         elif timeout:
             reason = "timeout"
         return obs, reward, terminated, truncated, {"reward_components": parts, "termination_reason": reason}

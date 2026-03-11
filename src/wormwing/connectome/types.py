@@ -60,6 +60,7 @@ class EpisodeMetrics:
     termination_reason: str
     edit_count: int
     graph_edit_distance_proxy: float
+    energy_remaining: float
 
 
 @dataclass

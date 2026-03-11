@@ -11,7 +11,7 @@ def wing_lift_drag(
     air_density: float = 1.225,
     hinge_angle: float = 0.0,
     beat_freq_hz: float = 400.0,
-    cl: float = 0.25,
+    cl: float = 1.0,
     cd: float = 1.0,
     thrust_ratio: float = 0.03,
 ) -> tuple[float, float]:
