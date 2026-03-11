@@ -3,7 +3,7 @@ elite_count: 4
 generations: 40
 max_edits: 8
 train_eval_seeds: [0,1,2,3]
-new_edge_values: [-1.0, -0.5, 0.5, 1.0]
+new_edge_values: [-5.0, -2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 5.0]
 edit_penalty: 0.05
 mutation:
   p_append: 0.35
