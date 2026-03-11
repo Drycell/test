@@ -26,7 +26,7 @@ class EnvConfig:
     wing_chord_m: float = 0.0005
     air_density: float = 1.225
     wing_target_range_rad: float = 1.5
-    beat_freq_hz: float = 2000.0
+    beat_freq_hz: float = 400.0
 
 
 def build_xml(cfg: EnvConfig) -> str:
@@ -43,16 +43,16 @@ def build_xml(cfg: EnvConfig) -> str:
     <geom name='ground' type='plane' size='0.05 0.05 0.001' rgba='0.2 0.3 0.2 1'/>
     <body name='torso' pos='0 0 {cfg.start_height}'>
       <freejoint/>
-      <inertial pos='0 0 0' mass='1.0e-6' diaginertia='1e-12 1e-12 2e-13'/>
+      <inertial pos='0 0 0' mass='5.0e-9' diaginertia='4e-15 4e-15 1e-15'/>
       <geom type='capsule' fromto='-{half_body} 0 0 {half_body} 0 0' size='{cfg.body_radius_m}' contype='0' conaffinity='0'/>
       <body name='left_wing' pos='0 {wing_attach} 0'>
         <joint name='left_hinge' type='hinge' axis='1 0 0' range='-90 90'/>
-        <inertial pos='0 {wing_half_span} 0' mass='1.0e-7' diaginertia='1e-14 1e-14 1e-14'/>
+        <inertial pos='0 {wing_half_span} 0' mass='5.0e-11' diaginertia='1e-15 1e-15 1e-15'/>
         <geom name='left_wing_geom' type='box' pos='0 {wing_half_span} 0' size='{wing_half_chord} {wing_half_span} {wing_half_thickness}' contype='0' conaffinity='0'/>
       </body>
       <body name='right_wing' pos='0 -{wing_attach} 0'>
         <joint name='right_hinge' type='hinge' axis='1 0 0' range='-90 90'/>
-        <inertial pos='0 -{wing_half_span} 0' mass='1.0e-7' diaginertia='1e-14 1e-14 1e-14'/>
+        <inertial pos='0 -{wing_half_span} 0' mass='5.0e-11' diaginertia='1e-15 1e-15 1e-15'/>
         <geom name='right_wing_geom' type='box' pos='0 -{wing_half_span} 0' size='{wing_half_chord} {wing_half_span} {wing_half_thickness}' contype='0' conaffinity='0'/>
       </body>
     </body>
@@ -208,4 +208,13 @@ class WingedWorm3DEnv(gym.Env):
         terminated = bool(crash or tilted or nan_state)
         truncated = bool(timeout and not terminated)
         reward, parts = self._reward(action, terminated)
-        return obs, reward, terminated, truncated, {"reward_components": parts}
+        reason = "running"
+        if crash:
+            reason = "crash"
+        elif tilted:
+            reason = "tilted"
+        elif nan_state:
+            reason = "nan"
+        elif timeout:
+            reason = "timeout"
+        return obs, reward, terminated, truncated, {"reward_components": parts, "termination_reason": reason}

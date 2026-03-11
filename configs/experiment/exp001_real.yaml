@@ -17,7 +17,7 @@ env:
   wing_span_m: 0.0005
   wing_chord_m: 0.0005
   air_density: 1.225
-  beat_freq_hz: 2000.0
+  beat_freq_hz: 400.0
 controller:
   type: ctrnn
   tau_init: 0.01

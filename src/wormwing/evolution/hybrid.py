@@ -40,17 +40,25 @@ def run_structure_first_hybrid(
     sigma: float = 0.2,
     edit_penalty: float = 0.05,
 ) -> dict[str, float]:
-    n = controller.w_chem.shape[0]
-    dim = 2 * n
+    n_nodes = controller.w_chem.shape[0]
+    n_edges = len(structural.edits)
+    dim = (2 * n_nodes) + n_edges
     opt = CMA(mean=np.zeros(dim, dtype=float), sigma=sigma, population_size=8)
     best = -1e18
+
     for _ in range(local_steps):
         sols: list[tuple[np.ndarray, float]] = []
         for _ in range(opt.population_size):
             x = opt.ask()
-            g = HybridGenome(structural=structural, bias_delta=x[:n], tau_log_scale_delta=x[n:], edited_edge_scale_delta=None)
+            g = HybridGenome(
+                structural=structural,
+                bias_delta=x[:n_nodes],
+                tau_log_scale_delta=x[n_nodes : 2 * n_nodes],
+                edited_edge_scale_delta=x[2 * n_nodes :] if n_edges > 0 else None,
+            )
             score = _evaluate_hybrid_candidate(controller, env, g, seeds, edit_penalty=edit_penalty)
             sols.append((x, -score))
             best = max(best, score)
         opt.tell(sols)
-    return {"hybrid_best_reward": float(best)}
+
+    return {"hybrid_best_reward": float(best), "hybrid_dim": float(dim)}

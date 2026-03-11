@@ -17,7 +17,7 @@ from wormwing.controllers.fixed_readout import FixedReadoutController
 from wormwing.envs.winged_worm_3d import EnvConfig, WingedWorm3DEnv
 from wormwing.evolution.fixed_readout import run_fixed_readout_optimization
 from wormwing.evolution.hybrid import run_structure_first_hybrid
-from wormwing.evolution.structure_only import evaluate_genome, run_structure_only
+from wormwing.evolution.structure_only import evaluate_genome, evaluate_success_rate, run_structure_only
 from wormwing.experiments.baselines import run_fixed_readout_baseline, run_pd_baseline
 
 
@@ -122,9 +122,11 @@ def main() -> None:
         final_eval_seeds,
         float(cfg.get("evolution", {}).get("edit_penalty", 0.05)),
     )
+    success_rate, termination_reasons = evaluate_success_rate(best_genome, controller, env, final_eval_seeds)
     eval_summary = {
         "status": "ok",
-        "success_rate": 1.0 if eval_metrics.episode_length >= env.max_steps else 0.0,
+        "success_rate": float(success_rate),
+        "termination_reasons": termination_reasons,
         "mean_total_reward": float(eval_score),
         "mean_episode_length": float(eval_metrics.episode_length),
         "mean_forward_distance": float(eval_metrics.forward_distance),

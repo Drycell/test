@@ -2,7 +2,39 @@ experiment:
   name: exp001_mock_long
   mode: structure_only
   connectome_mode: mock
+env:
+  episode_seconds: 2.0
+  physics_dt: 0.00005
+  control_dt: 0.001
+  start_height: 0.005
+  start_forward_speed: 0.05
+  crash_height: 0.0002
+  max_tilt_deg: 75
+  body_length_m: 0.001
+  body_radius_m: 0.00004
+  wing_span_m: 0.0005
+  wing_chord_m: 0.0005
+  air_density: 1.225
+  beat_freq_hz: 400.0
+controller:
+  type: ctrnn
+  tau_init: 0.01
+  bias_init: 0.0
+  use_virtual_nodes: true
+  motor_bias: [0.8, -0.8]
 evolution:
   population_size: 96
+  elite_count: 8
   generations: 150
   max_edits: 8
+  train_eval_seeds: [0, 1, 2, 3]
+  final_eval_seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+  mutation:
+    p_append: 0.35
+    p_delete: 0.15
+    p_replace: 0.20
+    p_retarget: 0.15
+    p_rescale: 0.15
+  edit_penalty: 0.05
+seeds:
+  master_seed: 123

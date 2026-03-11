@@ -22,9 +22,9 @@ def _sample_pair(mask: np.ndarray | None, rng: np.random.Generator, n_nodes: int
         return src, dst
     candidates = np.argwhere(mask)
     if candidates.size == 0:
-        return 0, 1
-    idx = int(rng.integers(0, len(candidates)))
-    return int(candidates[idx, 0]), int(candidates[idx, 1])
+        return 0, min(1, n_nodes - 1)
+    src, dst = candidates[int(rng.integers(0, len(candidates)))].tolist()
+    return int(src), int(dst)
 
 
 def _random_edit(rng: np.random.Generator, connectome: ConnectomeData) -> StructuralEdit:
@@ -71,7 +71,7 @@ def mutate_genome(parent: StructuralGenome, connectome: ConnectomeData, seed: in
         e = edits[i]
         aux_src, aux_dst = _sample_pair(connectome.allowed_add_chem_mask, rng, connectome.chemical_weights.shape[0])
         edits[i] = StructuralEdit(op=e.op, src=e.src, dst=e.dst, aux_src=aux_src, aux_dst=aux_dst, value=e.value)
-    elif r < total and edits:
+    elif edits:
         i = int(rng.integers(0, len(edits)))
         e = edits[i]
         edits[i] = StructuralEdit(op=e.op, src=e.src, dst=e.dst, aux_src=e.aux_src, aux_dst=e.aux_dst, value=float(rng.choice(EDGE_VALUES)))
@@ -83,6 +83,7 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
     controller.apply_structural_genome(genome)
     controller.reset(seed)
     obs, _ = env.reset(seed=seed)
+    initial_x = float(env.data.qpos[0])
 
     total_reward = 0.0
     done = False
@@ -92,6 +93,7 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
     angvel_penalties: list[float] = []
     control_efforts: list[float] = []
     trajectory: list[np.ndarray] = []
+    last_info: dict = {}
 
     while not done:
         trajectory.append(obs.astype(np.float32, copy=True))
@@ -104,17 +106,18 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
         reward_components = info.get("reward_components", {})
         angvel_penalties.append(float(abs(reward_components.get("angvel_penalty", 0.0))))
         control_efforts.append(float(abs(reward_components.get("control_effort_penalty", 0.0))))
+        last_info = info
         done = bool(term or trunc)
 
     metrics = EpisodeMetrics(
         total_reward=float(total_reward),
         episode_length=steps,
-        forward_distance=float(obs[5]),
+        forward_distance=float(env.data.qpos[0]) - initial_x,
         mean_height=float(np.mean(heights)) if heights else 0.0,
         mean_tilt_error=float(np.mean(tilt_errors)) if tilt_errors else 0.0,
         mean_angvel_penalty=float(np.mean(angvel_penalties)) if angvel_penalties else 0.0,
         mean_control_effort=float(np.mean(control_efforts)) if control_efforts else 0.0,
-        termination_reason="done",
+        termination_reason=str(last_info.get("termination_reason", "done")),
         edit_count=len(genome.edits),
         graph_edit_distance_proxy=float(len(genome.edits)),
     )
@@ -141,11 +144,22 @@ def evaluate_genome(genome: StructuralGenome, controller: ConnectomeCTRNN, env: 
         mean_tilt_error=float(np.mean([m.mean_tilt_error for m in episode_metrics])),
         mean_angvel_penalty=float(np.mean([m.mean_angvel_penalty for m in episode_metrics])),
         mean_control_effort=float(np.mean([m.mean_control_effort for m in episode_metrics])),
-        termination_reason="done",
+        termination_reason=str(episode_metrics[-1].termination_reason),
         edit_count=len(genome.edits),
         graph_edit_distance_proxy=float(len(genome.edits)),
     )
     return float(score), agg, best_traj
+
+
+def evaluate_success_rate(genome: StructuralGenome, controller: ConnectomeCTRNN, env: WingedWorm3DEnv, seeds: list[int]) -> tuple[float, list[str]]:
+    reasons: list[str] = []
+    successes = 0
+    for s in seeds:
+        m, _ = _run_episode(genome, controller, env, s)
+        reasons.append(m.termination_reason)
+        if m.termination_reason == "timeout" or m.episode_length >= env.max_steps:
+            successes += 1
+    return float(successes / max(1, len(seeds))), reasons
 
 
 def _apply_edits(base: np.ndarray, genome: StructuralGenome) -> np.ndarray:
