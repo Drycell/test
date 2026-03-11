@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import argparse
+import json
+import pickle
+import sys
+from pathlib import Path
+
+import yaml
+
+from wormwing.connectome.loader import load_connectome
+from wormwing.connectome.types import StructuralEdit, StructuralGenome
+from wormwing.controllers.ctrnn import ConnectomeCTRNN
+from wormwing.envs.winged_worm_3d import EnvConfig, WingedWorm3DEnv
+from wormwing.evolution.structure_only import evaluate_genome, evaluate_success_rate
+
+
+def _required_paths(run_dir: Path) -> tuple[Path, Path]:
+    return run_dir / "config_resolved.yaml", run_dir / "best.ckpt"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-dir", required=True)
+    args = parser.parse_args()
+    run_dir = Path(args.run_dir)
+
+    cfg_path, ckpt_path = _required_paths(run_dir)
+    missing = [str(p) for p in [cfg_path, ckpt_path] if not p.exists()]
+    if missing:
+        print(f"eval_guard_error missing files: {missing}. Run train first (e.g., make train-exp001).")
+        sys.exit(2)
+
+    cfg = yaml.safe_load(cfg_path.read_text())
+    exp_cfg = cfg.get("experiment", {})
+    ctrl_cfg = cfg.get("controller", {})
+    evo_cfg = cfg.get("evolution", {})
+
+    connectome_dir = "data/mock_connectome" if exp_cfg.get("connectome_mode", "mock") == "mock" else exp_cfg.get("real_data_dir", "data/real_connectome")
+    conn = load_connectome(connectome_dir, normalize=True)
+    env = WingedWorm3DEnv(EnvConfig(**{k: v for k, v in cfg.get("env", {}).items() if k in EnvConfig.__annotations__}))
+
+    motor_bias = tuple(ctrl_cfg.get("motor_bias", [0.0, 0.0]))
+    controller = ConnectomeCTRNN(
+        conn,
+        dt=float(cfg.get("env", {}).get("control_dt", 0.02)),
+        tau_init=float(ctrl_cfg.get("tau_init", 1.0)),
+        bias_init=float(ctrl_cfg.get("bias_init", 0.0)),
+        motor_bias=(float(motor_bias[0]), float(motor_bias[1])),
+    )
+
+    with ckpt_path.open("rb") as f:
+        ckpt = pickle.load(f)
+    g = ckpt["best_genome"]
+    genome = StructuralGenome(edits=[StructuralEdit(**e) for e in g["edits"]], max_edits=int(g["max_edits"]), seed=int(g["seed"]))
+
+    seeds = list(evo_cfg.get("final_eval_seeds", evo_cfg.get("train_eval_seeds", [0, 1, 2, 3])))
+    score, info, _ = evaluate_genome(genome, controller, env, seeds, float(evo_cfg.get("edit_penalty", 0.05)))
+    success_rate, termination_reasons = evaluate_success_rate(genome, controller, env, seeds)
+
+    summary = {
+        "status": "ok",
+        "success_rate": float(success_rate),
+        "termination_reasons": termination_reasons,
+        "mean_total_reward": float(score),
+        "mean_episode_length": float(info.episode_length),
+        "mean_forward_distance": float(info.forward_distance),
+        "mean_height": float(info.mean_height),
+        "mean_tilt_error": float(info.mean_tilt_error),
+        "mean_control_effort": float(info.mean_control_effort),
+        "edit_count": len(genome.edits),
+    }
+    (run_dir / "eval_summary.json").write_text(json.dumps(summary, indent=2))
+    print("eval_done", summary)
+
+
+if __name__ == "__main__":
+    main()

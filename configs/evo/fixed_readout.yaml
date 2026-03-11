@@ -1,0 +1,4 @@
+mode: fixed_readout
+population_size: 24
+generations: 30
+train_eval_seeds: [0, 1, 2, 3]
