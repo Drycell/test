@@ -55,7 +55,7 @@ class ConnectomeCTRNN:
         x = np.nan_to_num(self.state.x, nan=0.0, posinf=10.0, neginf=-10.0)
         tanh_x = np.tanh(x)
         gap_term = np.sum(self.w_gap * (x[None, :] - x[:, None]), axis=1)
-        x_dot = (-x + self.w_chem @ tanh_x + gap_term + self.bias) / np.maximum(self.tau, 1e-3)
+        x_dot = (-x + self.w_chem.T @ tanh_x + gap_term + self.bias) / np.maximum(self.tau, 1e-3)
         self.state.x = np.nan_to_num(x + self.dt * x_dot, nan=0.0, posinf=10.0, neginf=-10.0)
         self._inject_observation(observation)
         self.state.t += self.dt

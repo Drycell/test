@@ -29,9 +29,9 @@ class EnvConfig:
     beat_freq_hz: float = 400.0
     suppress_mujoco_warnings: bool = True
     energy_budget: float = 1.0
-    basal_cost_per_step: float = 0.0002
-    wing_cost_scale: float = 0.001
-    stall_cost_per_step: float = 0.02
+    basal_cost_per_step: float = 0.0001
+    wing_cost_scale: float = 0.002
+    stall_cost_per_step: float = 0.005
 
 
 def build_xml(cfg: EnvConfig) -> str:
@@ -92,7 +92,6 @@ class WingedWorm3DEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
         self.energy = float(self.config.energy_budget)
-        self.last_action = np.zeros(2, dtype=float)
 
     def _get_obs(self) -> np.ndarray:
         qpos, qvel = self.data.qpos, self.data.qvel
@@ -147,10 +146,8 @@ class WingedWorm3DEnv(gym.Env):
         body_area = self.config.body_length_m * 2.0 * self.config.body_radius_m
         torso_drag = body_drag(vx, area_m2=body_area, air_density=self.config.air_density)
 
-        left_gain = float(abs(self.last_action[0]))
-        right_gain = float(abs(self.last_action[1]))
-        self.data.xfrc_applied[self.left_wing_body] = np.array([left_gain * ldrag, 0.0, left_gain * llift, 0.0, 0.0, 0.0])
-        self.data.xfrc_applied[self.right_wing_body] = np.array([right_gain * rdrag, 0.0, right_gain * rlift, 0.0, 0.0, 0.0])
+        self.data.xfrc_applied[self.left_wing_body] = np.array([ldrag, 0.0, llift, 0.0, 0.0, 0.0])
+        self.data.xfrc_applied[self.right_wing_body] = np.array([rdrag, 0.0, rlift, 0.0, 0.0, 0.0])
         self.data.xfrc_applied[self.torso_body, 0] += torso_drag
 
         self.data.qfrc_applied[self.left_hinge_qvel_idx] += wing_torque_damping(lhv)
@@ -186,8 +183,8 @@ class WingedWorm3DEnv(gym.Env):
         mujoco.mj_resetData(self.model, self.data)
         rng = np.random.default_rng(seed)
         self.data.qpos[2] = self.config.start_height
-        roll = rng.uniform(-0.25, 0.25)
-        pitch = rng.uniform(-0.25, 0.25)
+        roll = rng.uniform(-0.12, 0.12)
+        pitch = rng.uniform(-0.12, 0.12)
         q = np.array([
             math.cos(roll / 2) * math.cos(pitch / 2),
             math.sin(roll / 2) * math.cos(pitch / 2),
@@ -198,15 +195,13 @@ class WingedWorm3DEnv(gym.Env):
         self.data.qvel[0] = self.config.start_forward_speed + rng.uniform(-0.002, 0.002)
         self.data.qvel[3] = rng.uniform(-0.1, 0.1)
         self.data.qvel[4] = rng.uniform(-0.1, 0.1)
-        self.data.qpos[self.left_hinge_qpos_idx] = 0.0
-        self.data.qpos[self.right_hinge_qpos_idx] = 0.0
+        self.data.qpos[self.left_hinge_qpos_idx] = rng.uniform(0.3, 0.5)
+        self.data.qpos[self.right_hinge_qpos_idx] = rng.uniform(-0.5, -0.3)
         self.energy = float(self.config.energy_budget)
-        self.last_action = np.zeros(2, dtype=float)
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):
         action = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
-        self.last_action = action.astype(float, copy=True)
         self.data.ctrl[:] = action * self.config.wing_target_range_rad
         for _ in range(self.n_substeps):
             self._apply_aero()

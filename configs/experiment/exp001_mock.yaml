@@ -18,15 +18,15 @@ env:
   air_density: 1.225
   beat_freq_hz: 400.0
   energy_budget: 1.0
-  basal_cost_per_step: 0.0002
-  wing_cost_scale: 0.001
-  stall_cost_per_step: 0.02
+  basal_cost_per_step: 0.0001
+  wing_cost_scale: 0.002
+  stall_cost_per_step: 0.005
 controller:
   type: ctrnn
   tau_init: 0.01
   bias_init: 0.0
   use_virtual_nodes: true
-  motor_bias: [0.8, -0.8]
+  motor_bias: [0.3, -0.3]
 evolution:
   population_size: 32
   elite_count: 4
