@@ -14,18 +14,19 @@ from wormwing.aero.quasi_steady import body_drag, wing_lift_drag, wing_torque_da
 @dataclass
 class EnvConfig:
     episode_seconds: float = 8.0
-    physics_dt: float = 0.001
-    control_dt: float = 0.01
-    start_height: float = 0.01
+    physics_dt: float = 0.00005
+    control_dt: float = 0.001
+    start_height: float = 0.005
     start_forward_speed: float = 0.05
-    crash_height: float = 0.002
+    crash_height: float = 0.0002
     max_tilt_deg: float = 75.0
-    body_length_m: float = 0.01
-    body_radius_m: float = 0.0005
-    wing_span_m: float = 0.004
-    wing_chord_m: float = 0.0008
+    body_length_m: float = 0.001
+    body_radius_m: float = 0.00004
+    wing_span_m: float = 0.0005
+    wing_chord_m: float = 0.0005
     air_density: float = 1.225
     wing_target_range_rad: float = 1.5
+    beat_freq_hz: float = 2000.0
 
 
 def build_xml(cfg: EnvConfig) -> str:
@@ -33,32 +34,32 @@ def build_xml(cfg: EnvConfig) -> str:
     wing_attach = cfg.body_radius_m * 1.8
     wing_half_span = cfg.wing_span_m * 0.5
     wing_half_chord = cfg.wing_chord_m * 0.5
-    wing_half_thickness = max(1e-6, cfg.wing_chord_m * 0.01)
+    wing_half_thickness = max(1e-6, cfg.wing_chord_m * 0.0125)
     return f"""
 <mujoco model='winged_worm'>
-  <compiler inertiafromgeom='false' boundmass='1e-12' boundinertia='1e-16'/>
+  <compiler inertiafromgeom='false' boundmass='1e-14' boundinertia='1e-20'/>
   <option timestep='{cfg.physics_dt}' gravity='0 0 -9.81'/>
   <worldbody>
     <geom name='ground' type='plane' size='0.05 0.05 0.001' rgba='0.2 0.3 0.2 1'/>
     <body name='torso' pos='0 0 {cfg.start_height}'>
       <freejoint/>
-      <inertial pos='0 0 0' mass='3.0e-5' diaginertia='2e-10 2e-10 2e-10'/>
+      <inertial pos='0 0 0' mass='1.0e-6' diaginertia='1e-12 1e-12 2e-13'/>
       <geom type='capsule' fromto='-{half_body} 0 0 {half_body} 0 0' size='{cfg.body_radius_m}' contype='0' conaffinity='0'/>
       <body name='left_wing' pos='0 {wing_attach} 0'>
         <joint name='left_hinge' type='hinge' axis='1 0 0' range='-90 90'/>
-        <inertial pos='0 {wing_half_span} 0' mass='5.0e-6' diaginertia='1e-11 1e-11 1e-11'/>
+        <inertial pos='0 {wing_half_span} 0' mass='1.0e-7' diaginertia='1e-14 1e-14 1e-14'/>
         <geom name='left_wing_geom' type='box' pos='0 {wing_half_span} 0' size='{wing_half_chord} {wing_half_span} {wing_half_thickness}' contype='0' conaffinity='0'/>
       </body>
       <body name='right_wing' pos='0 -{wing_attach} 0'>
         <joint name='right_hinge' type='hinge' axis='1 0 0' range='-90 90'/>
-        <inertial pos='0 -{wing_half_span} 0' mass='5.0e-6' diaginertia='1e-11 1e-11 1e-11'/>
+        <inertial pos='0 -{wing_half_span} 0' mass='1.0e-7' diaginertia='1e-14 1e-14 1e-14'/>
         <geom name='right_wing_geom' type='box' pos='0 -{wing_half_span} 0' size='{wing_half_chord} {wing_half_span} {wing_half_thickness}' contype='0' conaffinity='0'/>
       </body>
     </body>
   </worldbody>
   <actuator>
-    <position joint='left_hinge' kp='1e-4' ctrlrange='-{cfg.wing_target_range_rad} {cfg.wing_target_range_rad}' forcerange='-1e-4 1e-4'/>
-    <position joint='right_hinge' kp='1e-4' ctrlrange='-{cfg.wing_target_range_rad} {cfg.wing_target_range_rad}' forcerange='-1e-4 1e-4'/>
+    <position joint='left_hinge' kp='1e-10' ctrlrange='-{cfg.wing_target_range_rad} {cfg.wing_target_range_rad}'/>
+    <position joint='right_hinge' kp='1e-10' ctrlrange='-{cfg.wing_target_range_rad} {cfg.wing_target_range_rad}'/>
   </actuator>
 </mujoco>
 """
@@ -79,6 +80,8 @@ class WingedWorm3DEnv(gym.Env):
         self.torso_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
         self.left_hinge_qvel_idx = 6
         self.right_hinge_qvel_idx = 7
+        self.left_hinge_qpos_idx = 7
+        self.right_hinge_qpos_idx = 8
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
 
@@ -95,10 +98,10 @@ class WingedWorm3DEnv(gym.Env):
             qvel[1],
             qvel[2],
             qpos[2],
-            qpos[7],
-            qpos[8],
-            qvel[6],
-            qvel[7],
+            qpos[self.left_hinge_qpos_idx],
+            qpos[self.right_hinge_qpos_idx],
+            qvel[self.left_hinge_qvel_idx],
+            qvel[self.right_hinge_qvel_idx],
         ], dtype=np.float32)
 
     @staticmethod
@@ -112,15 +115,31 @@ class WingedWorm3DEnv(gym.Env):
         vx = float(self.data.qvel[0])
         lhv = float(self.data.qvel[self.left_hinge_qvel_idx])
         rhv = float(self.data.qvel[self.right_hinge_qvel_idx])
-        llift, ldrag = wing_lift_drag(lhv, vx, self.config.wing_span_m, self.config.wing_chord_m, self.config.air_density)
-        rlift, rdrag = wing_lift_drag(rhv, vx, self.config.wing_span_m, self.config.wing_chord_m, self.config.air_density)
+        lha = float(self.data.qpos[self.left_hinge_qpos_idx])
+        rha = float(self.data.qpos[self.right_hinge_qpos_idx])
+        llift, ldrag = wing_lift_drag(
+            lhv,
+            vx,
+            self.config.wing_span_m,
+            self.config.wing_chord_m,
+            self.config.air_density,
+            hinge_angle=lha,
+            beat_freq_hz=self.config.beat_freq_hz,
+        )
+        rlift, rdrag = wing_lift_drag(
+            rhv,
+            vx,
+            self.config.wing_span_m,
+            self.config.wing_chord_m,
+            self.config.air_density,
+            hinge_angle=rha,
+            beat_freq_hz=self.config.beat_freq_hz,
+        )
         body_area = self.config.body_length_m * 2.0 * self.config.body_radius_m
         torso_drag = body_drag(vx, area_m2=body_area, air_density=self.config.air_density)
 
         self.data.xfrc_applied[self.left_wing_body] = np.array([ldrag, 0.0, llift, 0.0, 0.0, 0.0])
         self.data.xfrc_applied[self.right_wing_body] = np.array([rdrag, 0.0, rlift, 0.0, 0.0, 0.0])
-
-        # small translational/rotational damping on torso for stability
         self.data.xfrc_applied[self.torso_body, 0:3] += -2e-9 * self.data.qvel[0:3]
         self.data.xfrc_applied[self.torso_body, 3:6] += -2e-12 * self.data.qvel[3:6]
         self.data.xfrc_applied[self.torso_body, 0] += torso_drag
@@ -169,8 +188,8 @@ class WingedWorm3DEnv(gym.Env):
         self.data.qvel[0] = self.config.start_forward_speed + rng.uniform(-0.002, 0.002)
         self.data.qvel[3] = rng.uniform(-1.0, 1.0)
         self.data.qvel[4] = rng.uniform(-1.0, 1.0)
-        self.data.qpos[7] = rng.uniform(0.6, 0.8)
-        self.data.qpos[8] = rng.uniform(-0.8, -0.6)
+        self.data.qpos[self.left_hinge_qpos_idx] = rng.uniform(0.6, 0.8)
+        self.data.qpos[self.right_hinge_qpos_idx] = rng.uniform(-0.8, -0.6)
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):

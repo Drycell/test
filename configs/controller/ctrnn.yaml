@@ -1,4 +1,4 @@
 type: ctrnn
-tau_init: 1.0
+tau_init: 0.01
 bias_init: 0.0
 use_virtual_nodes: true

@@ -7,32 +7,48 @@ from pathlib import Path
 
 import numpy as np
 
-from wormwing.connectome.types import EpisodeMetrics, StructuralEdit, StructuralGenome
+from wormwing.connectome.types import ConnectomeData, EpisodeMetrics, StructuralEdit, StructuralGenome
 from wormwing.controllers.ctrnn import ConnectomeCTRNN
 from wormwing.envs.winged_worm_3d import WingedWorm3DEnv
 
 EDGE_VALUES = [-1.0, -0.5, 0.5, 1.0]
 
 
-def _random_edit(rng: np.random.Generator, n_nodes: int) -> StructuralEdit:
-    op = rng.choice(["add_chem", "del_chem", "flip_sign", "retarget_chem"])
-    src, dst = int(rng.integers(0, n_nodes)), int(rng.integers(0, n_nodes))
-    while src == dst:
-        dst = int(rng.integers(0, n_nodes))
-    if op == "retarget_chem":
-        aux_src, aux_dst = int(rng.integers(0, n_nodes)), int(rng.integers(0, n_nodes))
-        return StructuralEdit(op=op, src=src, dst=dst, aux_src=aux_src, aux_dst=aux_dst, value=float(rng.choice(EDGE_VALUES)))
-    return StructuralEdit(op=op, src=src, dst=dst, value=float(rng.choice(EDGE_VALUES)))
+def _sample_pair(mask: np.ndarray | None, rng: np.random.Generator, n_nodes: int) -> tuple[int, int]:
+    if mask is None:
+        src, dst = int(rng.integers(0, n_nodes)), int(rng.integers(0, n_nodes))
+        while src == dst:
+            dst = int(rng.integers(0, n_nodes))
+        return src, dst
+    candidates = np.argwhere(mask)
+    if candidates.size == 0:
+        return 0, 1
+    idx = int(rng.integers(0, len(candidates)))
+    return int(candidates[idx, 0]), int(candidates[idx, 1])
 
 
-def random_genome(n_nodes: int, max_edits: int, seed: int) -> StructuralGenome:
+def _random_edit(rng: np.random.Generator, connectome: ConnectomeData) -> StructuralEdit:
+    n_nodes = connectome.chemical_weights.shape[0]
+    op = str(rng.choice(["add_chem", "del_chem", "flip_sign", "retarget_chem"]))
+    if op == "add_chem":
+        src, dst = _sample_pair(connectome.allowed_add_chem_mask, rng, n_nodes)
+        return StructuralEdit(op=op, src=src, dst=dst, value=float(rng.choice(EDGE_VALUES)))
+    if op in {"del_chem", "flip_sign"}:
+        src, dst = _sample_pair(connectome.allowed_del_chem_mask, rng, n_nodes)
+        return StructuralEdit(op=op, src=src, dst=dst, value=float(rng.choice(EDGE_VALUES)))
+    src, dst = _sample_pair(connectome.allowed_del_chem_mask, rng, n_nodes)
+    aux_src, aux_dst = _sample_pair(connectome.allowed_add_chem_mask, rng, n_nodes)
+    return StructuralEdit(op=op, src=src, dst=dst, aux_src=aux_src, aux_dst=aux_dst, value=float(rng.choice(EDGE_VALUES)))
+
+
+def random_genome(connectome: ConnectomeData, max_edits: int, seed: int) -> StructuralGenome:
     rng = np.random.default_rng(seed)
     n_edits = int(rng.integers(1, max_edits + 1))
-    edits = [_random_edit(rng, n_nodes) for _ in range(n_edits)]
+    edits = [_random_edit(rng, connectome) for _ in range(n_edits)]
     return StructuralGenome(edits=edits, max_edits=max_edits, seed=seed)
 
 
-def mutate_genome(parent: StructuralGenome, n_nodes: int, seed: int, mutation_cfg: dict[str, float]) -> StructuralGenome:
+def mutate_genome(parent: StructuralGenome, connectome: ConnectomeData, seed: int, mutation_cfg: dict[str, float]) -> StructuralGenome:
     rng = np.random.default_rng(seed)
     edits = list(parent.edits)
 
@@ -45,23 +61,17 @@ def mutate_genome(parent: StructuralGenome, n_nodes: int, seed: int, mutation_cf
     total = max(1e-8, p_append + p_delete + p_replace + p_retarget + p_rescale)
     r = rng.random() * total
     if r < p_append and len(edits) < parent.max_edits:
-        edits.append(_random_edit(rng, n_nodes))
+        edits.append(_random_edit(rng, connectome))
     elif r < p_append + p_delete and edits:
         del edits[int(rng.integers(0, len(edits)))]
     elif r < p_append + p_delete + p_replace and edits:
-        edits[int(rng.integers(0, len(edits)))] = _random_edit(rng, n_nodes)
+        edits[int(rng.integers(0, len(edits)))] = _random_edit(rng, connectome)
     elif r < p_append + p_delete + p_replace + p_retarget and edits:
         i = int(rng.integers(0, len(edits)))
         e = edits[i]
-        edits[i] = StructuralEdit(
-            op=e.op,
-            src=e.src,
-            dst=e.dst,
-            aux_src=int(rng.integers(0, n_nodes)),
-            aux_dst=int(rng.integers(0, n_nodes)),
-            value=e.value,
-        )
-    elif r < p_append + p_delete + p_replace + p_retarget + p_rescale and edits:
+        aux_src, aux_dst = _sample_pair(connectome.allowed_add_chem_mask, rng, connectome.chemical_weights.shape[0])
+        edits[i] = StructuralEdit(op=e.op, src=e.src, dst=e.dst, aux_src=aux_src, aux_dst=aux_dst, value=e.value)
+    elif r < total and edits:
         i = int(rng.integers(0, len(edits)))
         e = edits[i]
         edits[i] = StructuralEdit(op=e.op, src=e.src, dst=e.dst, aux_src=e.aux_src, aux_dst=e.aux_dst, value=float(rng.choice(EDGE_VALUES)))
@@ -82,7 +92,6 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
     angvel_penalties: list[float] = []
     control_efforts: list[float] = []
     trajectory: list[np.ndarray] = []
-    last_info = {}
 
     while not done:
         trajectory.append(obs.astype(np.float32, copy=True))
@@ -95,7 +104,6 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
         reward_components = info.get("reward_components", {})
         angvel_penalties.append(float(abs(reward_components.get("angvel_penalty", 0.0))))
         control_efforts.append(float(abs(reward_components.get("control_effort_penalty", 0.0))))
-        last_info = info
         done = bool(term or trunc)
 
     metrics = EpisodeMetrics(
@@ -110,7 +118,6 @@ def _run_episode(genome: StructuralGenome, controller: ConnectomeCTRNN, env: Win
         edit_count=len(genome.edits),
         graph_edit_distance_proxy=float(len(genome.edits)),
     )
-    _ = last_info
     return metrics, np.asarray(trajectory, dtype=np.float32)
 
 
@@ -187,7 +194,7 @@ def run_structure_only(
     eval_seeds = train_eval_seeds or [0, 1, 2, 3]
     rng = np.random.default_rng(seed)
 
-    population = [random_genome(controller.w_chem.shape[0], max_edits, int(rng.integers(0, 1_000_000))) for _ in range(population_size)]
+    population = [random_genome(controller.connectome, max_edits, int(rng.integers(0, 1_000_000))) for _ in range(population_size)]
     best: StructuralGenome | None = None
     best_score = -1e18
     best_metrics: EpisodeMetrics | None = None
@@ -209,7 +216,7 @@ def run_structure_only(
         offspring: list[StructuralGenome] = []
         while len(offspring) + len(elites) < population_size:
             parent = elites[int(rng.integers(0, len(elites)))]
-            child = mutate_genome(parent, controller.w_chem.shape[0], int(rng.integers(0, 1_000_000)), mutation_cfg)
+            child = mutate_genome(parent, controller.connectome, int(rng.integers(0, 1_000_000)), mutation_cfg)
             offspring.append(child)
         population = elites + offspring
 
@@ -233,11 +240,7 @@ def run_structure_only(
     (run_dir / "best_genome.json").write_text(json.dumps(asdict(best), indent=2))
 
     before, after = controller.base_chem, _apply_edits(controller.base_chem, best)
-    summary = {
-        "edge_count_before": int(np.sum(before != 0.0)),
-        "edge_count_after": int(np.sum(after != 0.0)),
-        "edit_count": len(best.edits),
-    }
+    summary = {"edge_count_before": int(np.sum(before != 0.0)), "edge_count_after": int(np.sum(after != 0.0)), "edit_count": len(best.edits)}
     (run_dir / "best_graph_before_after.json").write_text(json.dumps(summary, indent=2))
     _write_graph_export(run_dir / "best_graph_before.gml", before)
     _write_graph_export(run_dir / "best_graph_after.gml", after)

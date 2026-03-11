@@ -9,30 +9,35 @@ def wing_lift_drag(
     wing_span_m: float,
     wing_chord_m: float,
     air_density: float = 1.225,
-    cl: float = 1.0,
-    cd: float = 1.4,
+    hinge_angle: float = 0.0,
+    beat_freq_hz: float = 400.0,
+    cl: float = 1.2,
+    cd: float = 1.2,
+    thrust_ratio: float = 0.08,
 ) -> tuple[float, float]:
-    """Simple deterministic quasi-steady aerodynamics for micro-scale wing actuation.
+    """Quasi-steady low-Re estimate for tiny flapping wings.
 
-    Returns lift (z) and drag (x) force magnitudes in Newton.
+    Uses beat-frequency-based tip speed so lift remains non-zero even when
+    position actuators hold hinge velocity near zero.
     """
-    wing_tip_speed = abs(hinge_vel) * max(wing_span_m, 1e-6)
-    rel_speed = max(1e-5, abs(body_vx) + wing_tip_speed)
-    area = max(1e-10, wing_span_m * wing_chord_m)
+    area = max(1e-12, wing_span_m * wing_chord_m)
+    flap_speed = 2.0 * math.pi * max(1.0, beat_freq_hz) * max(1e-6, wing_span_m) * abs(math.sin(float(hinge_angle)))
+    rel_speed = max(1e-5, abs(body_vx) + flap_speed + 0.1 * abs(hinge_vel) * wing_span_m)
     q = 0.5 * air_density * rel_speed * rel_speed
-    lift = q * cl * area * (1.0 if hinge_vel >= 0.0 else -1.0)
-    drag = q * cd * area * (-1.0 if body_vx >= 0.0 else 1.0)
-    return float(lift), float(drag)
+    lift = q * cl * area
+    drag = q * cd * area
+    thrust = thrust_ratio * lift
+    signed_drag = -math.copysign(drag, body_vx if abs(body_vx) > 1e-8 else 1.0)
+    return float(lift), float(signed_drag + thrust)
 
 
 def wing_torque_damping(hinge_vel: float, damping: float = 2e-10) -> float:
-    """Viscous damping around wing hinge for numerical stability."""
     return float(-damping * hinge_vel)
 
 
 def body_drag(body_vx: float, area_m2: float, air_density: float = 1.225, cd: float = 0.9) -> float:
     speed = abs(body_vx)
-    if speed < 1e-7:
+    if speed < 1e-8:
         return 0.0
     force = 0.5 * air_density * cd * area_m2 * speed * speed
     return float(-math.copysign(force, body_vx))
